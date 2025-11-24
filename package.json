@@ -1,0 +1,24 @@
+{
+    "name": "image-resize-service",
+    "version": "1.0.0",
+    "description": "Serverless image resize service on AWS",
+    "main": "handler.ts",
+    "scripts": {
+      "deploy": "serverless deploy",
+      "remove": "serverless remove",
+      "logs": "serverless logs -f resize -t",
+      "test": "jest",
+      "build": "tsc"
+    },
+    "dependencies": {
+      "@aws-sdk/client-s3": "^3.645.0",
+      "sharp": "^0.33.5"
+    },
+    "devDependencies": {
+      "@types/aws-lambda": "^8.10.145",
+      "@types/node": "^20.14.0",
+      "serverless": "^3.38.0",
+      "serverless-plugin-typescript": "^2.1.5",
+      "typescript": "^5.5.0"
+    }
+  }
