@@ -1,0 +1,157 @@
+service: image-resize-service
+
+frameworkVersion: '3'
+
+provider:
+  name: aws
+  runtime: nodejs18.x
+  region: ap-southeast-1
+  stage: ${opt:stage, 'dev'}
+  memorySize: 1024
+  timeout: 30
+  deploymentBucket:
+    blockPublicAccess: true
+  environment:
+    BUCKET_NAME: ${self:custom.bucketName}
+    CACHE_BUCKET: ${self:custom.cacheBucketName}
+  iam:
+    role:
+      statements:
+        - Effect: Allow
+          Action:
+            - s3:GetObject
+            - s3:PutObject
+            - s3:HeadObject
+            - s3:ListBucket
+          Resource:
+            - arn:aws:s3:::${self:custom.bucketName}/*
+            - arn:aws:s3:::${self:custom.cacheBucketName}/*
+
+  apiGateway:
+    binaryMediaTypes:
+      - 'image/jpeg'
+      - 'image/jpg'
+      - 'image/png'
+      - 'image/webp'
+      - '*/*'
+
+
+custom:
+  bucketName: ${self:service}-images-${self:provider.stage}
+  cacheBucketName: ${self:service}-cache-${self:provider.stage}
+
+functions:
+  resize:
+    handler: dist/handler.resize
+    layers:
+      # Sharp Layer for Node.js 18 (maintained by Klayers)
+      - arn:aws:lambda:ap-southeast-1:611603486626:layer:sharp-layer:4
+    events:
+      - http:
+          path: resize/{proxy+}
+          method: get
+          cors: true
+
+resources:
+  Resources:
+    # Original Images Bucket
+    ImagesBucket:
+      Type: AWS::S3::Bucket
+      Properties:
+        BucketName: ${self:custom.bucketName}
+        CorsConfiguration:
+          CorsRules:
+            - AllowedOrigins:
+                - '*'
+              AllowedMethods:
+                - GET
+                - HEAD
+              AllowedHeaders:
+                - '*'
+
+    # Cache Bucket for Resized Images
+    CacheBucket:
+      Type: AWS::S3::Bucket
+      Properties:
+        BucketName: ${self:custom.cacheBucketName}
+        CorsConfiguration:
+          CorsRules:
+            - AllowedOrigins:
+                - '*'
+              AllowedMethods:
+                - GET
+                - HEAD
+              AllowedHeaders:
+                - '*'
+
+    # CloudFront Distribution
+    CloudFrontDistribution:
+      Type: AWS::CloudFront::Distribution
+      Properties:
+        DistributionConfig:
+          Enabled: true
+          Comment: Image Resize Service CDN
+          DefaultCacheBehavior:
+            TargetOriginId: ApiGateway
+            ViewerProtocolPolicy: redirect-to-https
+            AllowedMethods:
+              - GET
+              - HEAD
+              - OPTIONS
+            CachedMethods:
+              - GET
+              - HEAD
+            ForwardedValues:
+              QueryString: true
+              Headers:
+                - Accept
+              QueryStringCacheKeys:
+                - width
+                - height
+            MinTTL: 0
+            DefaultTTL: 86400
+            MaxTTL: 31536000
+            Compress: true
+          Origins:
+            - Id: ApiGateway
+              DomainName:
+                Fn::Join:
+                  - ''
+                  - - Ref: ApiGatewayRestApi
+                    - .execute-api.
+                    - Ref: AWS::Region
+                    - .amazonaws.com
+              OriginPath: /${self:provider.stage}
+              CustomOriginConfig:
+                HTTPPort: 80
+                HTTPSPort: 443
+                OriginProtocolPolicy: https-only
+          PriceClass: PriceClass_100
+
+  Outputs:
+    ApiGatewayUrl:
+      Description: API Gateway URL
+      Value:
+        Fn::Join:
+          - ''
+          - - https://
+            - Ref: ApiGatewayRestApi
+            - .execute-api.
+            - Ref: AWS::Region
+            - .amazonaws.com/
+            - ${self:provider.stage}
+
+    CloudFrontUrl:
+      Description: CloudFront Distribution URL
+      Value:
+        Fn::GetAtt:
+          - CloudFrontDistribution
+          - DomainName
+
+    ImagesBucketName:
+      Description: Original Images Bucket
+      Value: ${self:custom.bucketName}
+
+    CacheBucketName:
+      Description: Cache Bucket
+      Value: ${self:custom.cacheBucketName}
